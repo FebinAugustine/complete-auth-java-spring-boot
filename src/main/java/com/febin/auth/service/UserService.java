@@ -1,6 +1,7 @@
 package com.febin.auth.service;
 
 import com.febin.auth.entity.*;
+import com.febin.auth.exception.InvalidPasswordException;
 import com.febin.auth.repository.RoleRepository;
 import com.febin.auth.repository.UserProviderRepository;
 import com.febin.auth.repository.UserRepository;
@@ -10,6 +11,7 @@ import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
 
@@ -36,6 +38,7 @@ public class UserService implements UserDetailsService {
                 .orElseThrow(() -> new UsernameNotFoundException("User not found with username or email: " + username));
     }
 
+    @Transactional
     public User registerUser(String username, String email, String rawPassword) {
         if (userRepository.existsByUsername(username)) throw new RuntimeException("Username already taken");
         if (userRepository.existsByEmail(email)) throw new RuntimeException("Email already in use");
@@ -48,6 +51,15 @@ public class UserService implements UserDetailsService {
         Role userRole = roleRepository.findByName("ROLE_USER").orElseThrow(() -> new RuntimeException("Role not found"));
         user.setRoles(Set.of(userRole));
         return userRepository.save(user);
+    }
+
+    @Transactional
+    public void resetPassword(User user, String currentPassword, String newPassword) {
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new InvalidPasswordException("Current password does not match");
+        }
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
     }
 
     public Optional<User> findByUsernameOrEmail(String usernameOrEmail) {

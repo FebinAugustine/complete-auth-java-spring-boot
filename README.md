@@ -66,6 +66,8 @@ The base URL for the service is `http://localhost:8080`.
 | `/api/auth/logout`            | `POST` | Invalidates the user's session and clears authentication cookies.                                           |
 | `/oauth2/authorization/{provider}` | `GET`  | **(Browser Only)** Initiates the OAuth2 login flow. Replace `{provider}` with `google` or `github`. |
 
+### These are the URLs that Google and GitHub will redirect back to. You never need to interact with these directly.•
+Google Callback: http://localhost:8080/login/oauth2/code/google•GitHub Callback: http://localhost:8080/login/oauth2/code/github
 ### Example Payloads
 
 **POST `/api/auth/signup`**

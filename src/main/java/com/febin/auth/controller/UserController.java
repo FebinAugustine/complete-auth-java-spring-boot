@@ -1,24 +1,30 @@
 package com.febin.auth.controller;
 
+import com.febin.auth.dto.PasswordResetRequest;
 import com.febin.auth.dto.UserResponse;
 import com.febin.auth.entity.Role;
 import com.febin.auth.entity.User;
+import com.febin.auth.service.UserService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/users")
 public class UserController {
 
+    private final UserService userService;
+
+    public UserController(UserService userService) {
+        this.userService = userService;
+    }
+
     @GetMapping("/me")
     public ResponseEntity<UserResponse> getCurrentUser(Authentication authentication) {
-        // Spring Security guarantees that the principal is the UserDetails object
-        // that we set in the JwtAuthenticationFilter.
         User currentUser = (User) authentication.getPrincipal();
 
         UserResponse resp = new UserResponse();
@@ -28,5 +34,12 @@ public class UserController {
         resp.setRoles(currentUser.getRoles().stream().map(Role::getName).collect(Collectors.toSet()));
 
         return ResponseEntity.ok(resp);
+    }
+
+    @PostMapping("/me/password")
+    public ResponseEntity<?> resetPassword(Authentication authentication, @Valid @RequestBody PasswordResetRequest passwordResetRequest) {
+        User currentUser = (User) authentication.getPrincipal();
+        userService.resetPassword(currentUser, passwordResetRequest.getCurrentPassword(), passwordResetRequest.getNewPassword());
+        return ResponseEntity.ok(Map.of("message", "Password has been reset successfully"));
     }
 }
