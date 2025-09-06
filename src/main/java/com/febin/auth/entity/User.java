@@ -43,8 +43,9 @@ public class User implements UserDetails {
     @Column(name = "verification_code")
     private String verificationCode;
 
-    @Column(nullable = false)
-    private boolean enabled = false;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "account_status", nullable = false)
+    private AccountStatus accountStatus = AccountStatus.UNVERIFIED;
 
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(name = "user_roles",
@@ -81,6 +82,7 @@ public class User implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return this.enabled;
+        // The account is only considered "enabled" by Spring Security if the status is ACTIVE.
+        return this.accountStatus == AccountStatus.ACTIVE;
     }
 }

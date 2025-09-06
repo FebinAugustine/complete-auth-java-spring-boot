@@ -2,6 +2,8 @@ package com.febin.auth.controller;
 
 import com.febin.auth.dto.LoginRequest;
 import com.febin.auth.dto.SignupRequest;
+import com.febin.auth.entity.AccountStatus;
+import com.febin.auth.entity.User;
 import com.febin.auth.service.AuthService;
 import com.febin.auth.service.UserService;
 import com.febin.auth.util.CookieUtil;
@@ -16,6 +18,7 @@ import org.springframework.security.authentication.DisabledException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Authentication endpoints:
@@ -57,7 +60,18 @@ public class AuthController {
             authService.login(req, response);
             return ResponseEntity.ok(Map.of("message", "Logged in"));
         } catch (DisabledException e) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Please verify your email before logging in."));
+            // User is disabled, check for the reason
+            Optional<User> userOpt = userService.findByUsernameOrEmail(req.getUsernameOrEmail());
+            if (userOpt.isPresent()) {
+                User user = userOpt.get();
+                if (user.getAccountStatus() == AccountStatus.UNVERIFIED) {
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Please verify your email before logging in."));
+                } else if (user.getAccountStatus() == AccountStatus.DISABLED) {
+                    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Your account has been disabled. Please contact support."));
+                }
+            }
+            // Fallback for any other disabled state
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Account is disabled."));
         } catch (BadCredentialsException e) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Invalid username or password"));
         } catch (Exception e) {

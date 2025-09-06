@@ -57,15 +57,14 @@ public class UserService implements UserDetailsService {
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(rawPassword));
         user.setVerificationCode(UUID.randomUUID().toString());
-        user.setEnabled(false); // User is disabled until they verify their email
+        user.setAccountStatus(AccountStatus.UNVERIFIED);
 
         Role userRole = roleRepository.findByName("ROLE_USER").orElseThrow(() -> new RuntimeException("Role not found"));
         user.setRoles(Set.of(userRole));
         
         User savedUser = userRepository.save(user);
         
-        // Send verification email
-        emailService.sendAccountVerificationEmail(savedUser.getEmail(), savedUser.getVerificationCode());
+        emailService.sendAccountVerificationEmail(savedUser.getEmail(), savedUser.getUsername(), savedUser.getVerificationCode());
 
         return savedUser;
     }
@@ -75,8 +74,8 @@ public class UserService implements UserDetailsService {
         User user = userRepository.findByVerificationCode(code)
                 .orElseThrow(() -> new InvalidTokenException("Invalid verification code."));
 
-        user.setEnabled(true);
-        user.setVerificationCode(null); // Clear the code after verification
+        user.setAccountStatus(AccountStatus.ACTIVE);
+        user.setVerificationCode(null);
         userRepository.save(user);
     }
 
@@ -98,7 +97,7 @@ public class UserService implements UserDetailsService {
             user.setPasswordResetCode(code);
             user.setPasswordResetCodeExpiresAt(Instant.now().plusSeconds(600)); // 10 minutes
             userRepository.save(user);
-            emailService.sendPasswordResetEmail(user.getEmail(), code);
+            emailService.sendPasswordResetEmail(user.getEmail(), user.getUsername(), code);
         }
     }
 
@@ -115,6 +114,22 @@ public class UserService implements UserDetailsService {
         user.setPasswordResetCode(null);
         user.setPasswordResetCodeExpiresAt(null);
         userRepository.save(user);
+    }
+
+    public List<User> findAllUsers() {
+        return userRepository.findAll();
+    }
+
+    @Transactional
+    public void disableUserAccount(Long userIdToDisable, User adminUser) {
+        if (userIdToDisable.equals(adminUser.getId())) {
+            throw new IllegalArgumentException("Admin cannot disable their own account.");
+        }
+        User userToDisable = userRepository.findById(userIdToDisable)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + userIdToDisable));
+
+        userToDisable.setAccountStatus(AccountStatus.DISABLED);
+        userRepository.save(userToDisable);
     }
 
     public Optional<User> findByUsernameOrEmail(String usernameOrEmail) {
@@ -161,7 +176,7 @@ public class UserService implements UserDetailsService {
         user.setUsername(usernameCandidate);
         user.setEmail(email == null ? usernameCandidate + "@noemail.local" : email);
         user.setPassword(randomPassword);
-        user.setEnabled(true); // OAuth users are enabled by default
+        user.setAccountStatus(AccountStatus.ACTIVE);
 
         Role userRole = roleRepository.findByName("ROLE_USER").orElseThrow(() -> new RuntimeException("Role not found"));
         user.setRoles(Set.of(userRole));
