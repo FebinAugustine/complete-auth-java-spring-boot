@@ -10,31 +10,30 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.lang.NonNull;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.*;
-import java.util.stream.Collectors;
+import java.util.Arrays;
+import java.util.Optional;
 
 /**
  * Simple filter that extracts JWT access token from cookie named "ATK",
  * validates it with JwtUtil, and sets Authentication in SecurityContext.
- *
- * - If token missing/invalid -> leaves context unauthenticated.
- * - Roles are expected to be in claim "roles" as array/collection of strings.
- *
- * Ensure this filter runs BEFORE UsernamePasswordAuthenticationFilter.
  */
+@Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
-    private final String accessCookieName;
+    private final UserDetailsService userDetailsService;
+    private final String accessCookieName = "ATK";
 
-    public JwtAuthenticationFilter(JwtUtil jwtUtil, String accessCookieName) {
+    public JwtAuthenticationFilter(JwtUtil jwtUtil, UserDetailsService userDetailsService) {
         this.jwtUtil = jwtUtil;
-        this.accessCookieName = accessCookieName;
+        this.userDetailsService = userDetailsService;
     }
 
     @Override
@@ -46,21 +45,20 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (atkCookie.isPresent()) {
                 String token = atkCookie.get().getValue();
                 if (token != null && !token.isBlank() && !jwtUtil.isTokenExpired(token)) {
-                    Jws<io.jsonwebtoken.Claims> parsed = jwtUtil.parseClaims(token);
-                    Claims claims = parsed.getBody();
-                    String subject = claims.getSubject();
-                    Object rolesObj = claims.get("roles");
+                    Jws<Claims> parsed = jwtUtil.parseClaims(token);
+                    String username = parsed.getBody().getSubject();
 
-                    List<SimpleGrantedAuthority> authorities = parseRoles(rolesObj);
+                    // Load the full user details from the database
+                    UserDetails userDetails = userDetailsService.loadUserByUsername(username);
 
+                    // Create authentication token with the full UserDetails object
                     UsernamePasswordAuthenticationToken auth =
-                            new UsernamePasswordAuthenticationToken(subject, null, authorities);
+                            new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
                     SecurityContextHolder.getContext().setAuthentication(auth);
                 }
             }
         } catch (Exception ex) {
-            // If anything goes wrong while parsing token, do not set authentication.
-            // Optionally log this in real app.
+            // If anything goes wrong, do not set authentication.
         }
 
         filterChain.doFilter(request, response);
@@ -69,24 +67,5 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private Optional<Cookie> getCookie(HttpServletRequest req, String name) {
         if (req.getCookies() == null) return Optional.empty();
         return Arrays.stream(req.getCookies()).filter(c -> c.getName().equals(name)).findFirst();
-    }
-
-    @SuppressWarnings("unchecked")
-    private List<SimpleGrantedAuthority> parseRoles(Object rolesObj) {
-        if (rolesObj == null) return Collections.emptyList();
-        Collection<?> collection;
-        if (rolesObj instanceof Collection) {
-            collection = (Collection<?>) rolesObj;
-        } else if (rolesObj.getClass().isArray()) {
-            collection = Arrays.asList((Object[]) rolesObj);
-        } else {
-            // single role string
-            return List.of(new SimpleGrantedAuthority(String.valueOf(rolesObj)));
-        }
-        return collection.stream()
-                .filter(Objects::nonNull)
-                .map(Object::toString)
-                .map(SimpleGrantedAuthority::new)
-                .collect(Collectors.toList());
     }
 }

@@ -4,7 +4,6 @@ import com.febin.auth.oauth.OAuth2LoginFailureHandler;
 import com.febin.auth.oauth.OAuth2LoginSuccessHandler;
 import com.febin.auth.ratelimit.RateLimitFilter;
 import com.febin.auth.security.JwtAuthenticationFilter;
-import com.febin.auth.util.JwtUtil;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -30,18 +29,18 @@ public class SecurityConfig {
     private final OAuth2LoginSuccessHandler oauth2LoginSuccessHandler;
     private final OAuth2LoginFailureHandler oauth2LoginFailureHandler;
     private final RateLimitFilter rateLimitFilter;
-    private final JwtUtil jwtUtil;
+    private final JwtAuthenticationFilter jwtAuthenticationFilter; // Injected bean
 
     public SecurityConfig(OAuth2UserService<OAuth2UserRequest, OAuth2User> customOAuth2UserService,
                           OAuth2LoginSuccessHandler oauth2LoginSuccessHandler,
                           OAuth2LoginFailureHandler oauth2LoginFailureHandler,
                           RateLimitFilter rateLimitFilter,
-                          JwtUtil jwtUtil) {
+                          JwtAuthenticationFilter jwtAuthenticationFilter) { // Inject the filter
         this.customOAuth2UserService = customOAuth2UserService;
         this.oauth2LoginSuccessHandler = oauth2LoginSuccessHandler;
         this.oauth2LoginFailureHandler = oauth2LoginFailureHandler;
         this.rateLimitFilter = rateLimitFilter;
-        this.jwtUtil = jwtUtil;
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
     }
 
     @Bean
@@ -77,7 +76,8 @@ public class SecurityConfig {
 
         // 5) Filters order: RateLimiter -> JwtAuth -> UsernamePasswordAuthenticationFilter
         http.addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class);
-        http.addFilterBefore(new JwtAuthenticationFilter(jwtUtil, "ATK"), UsernamePasswordAuthenticationFilter.class);
+        // Use the injected filter bean instead of creating a new one
+        http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
