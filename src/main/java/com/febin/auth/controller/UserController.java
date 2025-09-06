@@ -6,6 +6,7 @@ import com.febin.auth.entity.Role;
 import com.febin.auth.entity.User;
 import com.febin.auth.service.UserService;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -24,7 +25,11 @@ public class UserController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<UserResponse> getCurrentUser(Authentication authentication) {
+    public ResponseEntity<?> getCurrentUser(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated() || !(authentication.getPrincipal() instanceof User)) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "No user is currently logged in or session is invalid."));
+        }
+
         User currentUser = (User) authentication.getPrincipal();
 
         UserResponse resp = new UserResponse();

@@ -40,6 +40,12 @@ public class User implements UserDetails {
     @Column(name = "password_reset_code_expires_at")
     private Instant passwordResetCodeExpiresAt;
 
+    @Column(name = "verification_code")
+    private String verificationCode;
+
+    @Column(nullable = false)
+    private boolean enabled = false;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(name = "user_roles",
             joinColumns = @JoinColumn(name = "user_id"),
@@ -75,6 +81,6 @@ public class User implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        return this.enabled;
     }
 }

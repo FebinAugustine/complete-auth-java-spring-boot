@@ -56,10 +56,28 @@ public class UserService implements UserDetailsService {
         user.setUsername(username);
         user.setEmail(email);
         user.setPassword(passwordEncoder.encode(rawPassword));
+        user.setVerificationCode(UUID.randomUUID().toString());
+        user.setEnabled(false); // User is disabled until they verify their email
 
         Role userRole = roleRepository.findByName("ROLE_USER").orElseThrow(() -> new RuntimeException("Role not found"));
         user.setRoles(Set.of(userRole));
-        return userRepository.save(user);
+        
+        User savedUser = userRepository.save(user);
+        
+        // Send verification email
+        emailService.sendAccountVerificationEmail(savedUser.getEmail(), savedUser.getVerificationCode());
+
+        return savedUser;
+    }
+
+    @Transactional
+    public void verifyUser(String code) {
+        User user = userRepository.findByVerificationCode(code)
+                .orElseThrow(() -> new InvalidTokenException("Invalid verification code."));
+
+        user.setEnabled(true);
+        user.setVerificationCode(null); // Clear the code after verification
+        userRepository.save(user);
     }
 
     @Transactional
@@ -82,17 +100,13 @@ public class UserService implements UserDetailsService {
             userRepository.save(user);
             emailService.sendPasswordResetEmail(user.getEmail(), code);
         }
-        // If user not found, we do nothing to prevent email enumeration attacks
     }
 
     @Transactional
     public void resetPasswordWithCode(String code, String newPassword) {
-        Optional<User> userOpt = userRepository.findByPasswordResetCode(code);
-        if (userOpt.isEmpty()) {
-            throw new InvalidTokenException("Invalid password reset code");
-        }
+        User user = userRepository.findByPasswordResetCode(code)
+                .orElseThrow(() -> new InvalidTokenException("Invalid password reset code"));
 
-        User user = userOpt.get();
         if (user.getPasswordResetCodeExpiresAt().isBefore(Instant.now())) {
             throw new InvalidTokenException("Password reset code has expired");
         }
@@ -147,6 +161,7 @@ public class UserService implements UserDetailsService {
         user.setUsername(usernameCandidate);
         user.setEmail(email == null ? usernameCandidate + "@noemail.local" : email);
         user.setPassword(randomPassword);
+        user.setEnabled(true); // OAuth users are enabled by default
 
         Role userRole = roleRepository.findByName("ROLE_USER").orElseThrow(() -> new RuntimeException("Role not found"));
         user.setRoles(Set.of(userRole));
