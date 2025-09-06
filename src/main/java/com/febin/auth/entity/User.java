@@ -34,6 +34,12 @@ public class User implements UserDetails {
     @Column(nullable = false)
     private String password;
 
+    @Column(name = "password_reset_code")
+    private String passwordResetCode;
+
+    @Column(name = "password_reset_code_expires_at")
+    private Instant passwordResetCodeExpiresAt;
+
     @ManyToMany(fetch = FetchType.EAGER)
     @JoinTable(name = "user_roles",
             joinColumns = @JoinColumn(name = "user_id"),

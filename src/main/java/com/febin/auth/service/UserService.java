@@ -2,6 +2,7 @@ package com.febin.auth.service;
 
 import com.febin.auth.entity.*;
 import com.febin.auth.exception.InvalidPasswordException;
+import com.febin.auth.exception.InvalidTokenException;
 import com.febin.auth.repository.RoleRepository;
 import com.febin.auth.repository.UserProviderRepository;
 import com.febin.auth.repository.UserRepository;
@@ -13,7 +14,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.*;
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import java.util.Random;
+import java.util.Set;
+import java.util.UUID;
 
 @Service
 public class UserService implements UserDetailsService {
@@ -21,15 +27,18 @@ public class UserService implements UserDetailsService {
     private final RoleRepository roleRepository;
     private final UserProviderRepository userProviderRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EmailService emailService;
 
     public UserService(UserRepository userRepository,
                        RoleRepository roleRepository,
                        UserProviderRepository userProviderRepository,
-                       @Lazy PasswordEncoder passwordEncoder) {
+                       @Lazy PasswordEncoder passwordEncoder,
+                       EmailService emailService) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.userProviderRepository = userProviderRepository;
         this.passwordEncoder = passwordEncoder;
+        this.emailService = emailService;
     }
 
     @Override
@@ -59,6 +68,38 @@ public class UserService implements UserDetailsService {
             throw new InvalidPasswordException("Current password does not match");
         }
         user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+    }
+
+    @Transactional
+    public void generateAndSendPasswordResetCode(String email) {
+        Optional<User> userOpt = userRepository.findByEmail(email);
+        if (userOpt.isPresent()) {
+            User user = userOpt.get();
+            String code = String.format("%06d", new Random().nextInt(999999));
+            user.setPasswordResetCode(code);
+            user.setPasswordResetCodeExpiresAt(Instant.now().plusSeconds(600)); // 10 minutes
+            userRepository.save(user);
+            emailService.sendPasswordResetEmail(user.getEmail(), code);
+        }
+        // If user not found, we do nothing to prevent email enumeration attacks
+    }
+
+    @Transactional
+    public void resetPasswordWithCode(String code, String newPassword) {
+        Optional<User> userOpt = userRepository.findByPasswordResetCode(code);
+        if (userOpt.isEmpty()) {
+            throw new InvalidTokenException("Invalid password reset code");
+        }
+
+        User user = userOpt.get();
+        if (user.getPasswordResetCodeExpiresAt().isBefore(Instant.now())) {
+            throw new InvalidTokenException("Password reset code has expired");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        user.setPasswordResetCode(null);
+        user.setPasswordResetCodeExpiresAt(null);
         userRepository.save(user);
     }
 

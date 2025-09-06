@@ -58,6 +58,7 @@ public class SecurityConfig {
                         "/api/auth/refresh",
                         "/api/auth/logout",
                         "/api/users/me/password", // Ignore CSRF for password reset
+                        "/api/auth/password/**", // Ignore CSRF for forgot password flow
                         "/oauth2/**"
                 )
         );
