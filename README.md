@@ -1,14 +1,14 @@
 # Product Requirements Document: Auth Service
 
 **Author:** Gemini AI  
-**Version:** 1.0  
+**Version:** 1.7  
 **Status:** In Development
 
 ---
 
 ## 1. Overview
 
-The Auth Service is a standalone, production-ready microservice responsible for handling all user authentication and authorization. It is designed to act as a centralized identity provider for a larger ecosystem of applications. The service provides a secure, robust, and scalable solution for managing user accounts, including local (email/password) registration and social logins via OAuth2 providers (Google and GitHub).
+The Auth Service is a standalone, production-ready microservice responsible for handling all user authentication and authorization. It is designed to act as a centralized identity provider for a larger ecosystem of applications. The service provides a secure, robust, and scalable solution for managing user accounts, including local registration with email verification, social logins (OAuth2), comprehensive password management, social account linking, account deletion, and a full suite of administrative functions.
 
 The primary goal of this service is to abstract away the complexities of authentication, providing a simple and secure API for frontend applications and other backend services.
 
@@ -18,9 +18,11 @@ The primary goal of this service is to abstract away the complexities of authent
 
 *   **Provide Secure Authentication:** Implement industry-standard security practices for user login and session management.
 *   **Support Multiple Authentication Methods:** Offer both traditional email/password registration and modern social logins.
-*   **Centralized User Identity:** Act as a single source of truth for user identity across multiple client applications.
+*   **Flexible Account Management:** Allow users to link, unlink, and delete their accounts.
+*   **Ensure User Validity:** Enforce email verification for new accounts to ensure users are reachable and legitimate.
+*   **Full Password Lifecycle Management:** Provide secure options for users to reset their current password or recover a forgotten password.
+*   **Administrative Oversight:** Grant administrators the ability to view and manage user accounts and system roles.
 *   **Developer-Friendly API:** Expose a clear, well-documented set of RESTful endpoints for easy integration.
-*   **Scalability and Reliability:** Built on a robust tech stack to handle high loads and ensure uptime.
 
 ---
 
@@ -28,28 +30,43 @@ The primary goal of this service is to abstract away the complexities of authent
 
 ### 3.1. User Account Management
 
-*   **Local User Registration:** Users can create a new account using a unique username, a valid email address, and a password. The service ensures that usernames and emails are unique.
-*   **Local User Authentication:** Registered users can log in using their username/email and password. Upon successful authentication, the service issues secure session tokens.
+*   **Local User Registration:** Users can sign up with a username, email, and password. The account remains in an `UNVERIFIED` state until the user verifies their email address.
+*   **Account Verification:** Upon registration, a unique verification link is sent to the user's email. Clicking this link activates the account, changing its status to `ACTIVE`. Users cannot log in until their account is verified.
+*   **Get Current User:** An authenticated user can retrieve their own profile information.
+*   **Account Deletion:** An authenticated user can permanently delete their own account.
 
-### 3.2. Session Management
+### 3.2. Social Account Management
 
-*   **JWT-Based Sessions:** The service uses JSON Web Tokens (JWT) for session management. Two tokens are issued upon login:
-    *   **Access Token (ATK):** A short-lived token used to authenticate API requests.
-    *   **Refresh Token (RTK):** A long-lived token used to obtain a new access token without requiring the user to log in again.
-*   **Secure Cookie Storage:** Both tokens are stored in `HttpOnly`, `Secure` cookies, preventing access from client-side JavaScript and mitigating XSS attacks.
-*   **Token Refresh:** A dedicated endpoint allows a client to refresh an expired access token using a valid refresh token.
-*   **Logout:** A logout endpoint invalidates the user's session by revoking the refresh token and clearing the authentication cookies.
+*   **Link Social Account:** A logged-in user can link their local account to an OAuth2 provider (Google, GitHub).
+*   **View Linked Accounts:** A logged-in user can view a list of their currently linked social accounts.
+*   **Unlink Social Account:** A logged-in user can remove a link to a social account from their profile.
 
-### 3.3. Social Login (OAuth2)
+### 3.3. Password Management
 
-*   **Provider Integration:** Supports user authentication via third-party OAuth2 providers, initially configured for **Google** and **GitHub**.
-*   **Seamless User Provisioning:** When a user logs in with an OAuth2 provider for the first time, a new user account is automatically created and linked to their social identity.
+*   **Logged-In Password Reset:** An authenticated user can change their password by providing their current password and a new password.
+*   **Forgot Password Flow:** An unauthenticated user can request a password reset by providing their email address.
 
-### 3.4. Security Features
+### 3.4. Session Management & Social Login
 
-*   **Password Encryption:** User passwords are never stored in plaintext. They are securely hashed using the **BCrypt** algorithm.
-*   **CSRF Protection:** Implements Cross-Site Request Forgery protection using a synchronized token pattern (cookie-based).
-*   **Rate Limiting:** Protects against brute-force attacks by enforcing rate limits on sensitive endpoints like login and signup.
+*   **JWT-Based Sessions:** The service uses JSON Web Tokens (JWT) for session management.
+*   **Secure Cookie Storage:** Tokens are stored in `HttpOnly`, `Secure` cookies.
+*   **Provider Integration:** Supports direct user authentication via Google and GitHub.
+
+### 3.5. Administrative Functions
+
+*   **User Listing:** Users with `ROLE_ADMIN` can retrieve a complete list of all users in the system.
+*   **Get User by ID:** An administrator can retrieve the full details of a single user by their ID.
+*   **Role Listing:** Users with `ROLE_ADMIN` can retrieve a list of all available roles in the system.
+*   **Disable User Account:** An administrator can disable any user's account (except their own).
+*   **Enable User Account:** An administrator can re-enable a disabled user's account.
+*   **Delete User Account:** An administrator can permanently delete any user's account (except their own).
+*   **Update User Roles:** An administrator can update the roles assigned to any user (except their own).
+
+### 3.6. Security Features
+
+*   **Password Encryption:** Passwords are securely hashed using the **BCrypt** algorithm.
+*   **CSRF Protection:** Implemented for browser-based flows, while being disabled for the stateless API endpoints.
+*   **Rate Limiting:** Protects sensitive endpoints against brute-force attacks.
 
 ---
 
@@ -57,51 +74,78 @@ The primary goal of this service is to abstract away the complexities of authent
 
 The base URL for the service is `http://localhost:8080`.
 
-| Endpoint                      | Method | Description                                                                                             |
-| ----------------------------- | ------ | ------------------------------------------------------------------------------------------------------- |
-| `/`                           | `GET`  | Public health-check endpoint to confirm the service is running.                                         |
-| `/api/auth/signup`            | `POST` | Registers a new user with a username, email, and password.                                                |
-| `/api/auth/login`             | `POST` | Authenticates a user with credentials and returns secure `HttpOnly` cookies for the session.                |
-| `/api/auth/refresh`           | `POST` | Uses the refresh token (sent via cookie) to issue a new access token.                                     |
-| `/api/auth/logout`            | `POST` | Invalidates the user's session and clears authentication cookies.                                           |
-| `/oauth2/authorization/{provider}` | `GET`  | **(Browser Only)** Initiates the OAuth2 login flow. Replace `{provider}` with `google` or `github`. |
+### 4.1. Authentication Endpoints
 
-### These are the URLs that Google and GitHub will redirect back to. You never need to interact with these directly.•
-Google Callback: http://localhost:8080/login/oauth2/code/google•GitHub Callback: http://localhost:8080/login/oauth2/code/github
-### Example Payloads
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/auth/signup` | `POST` | Registers a new user. The account will be `UNVERIFIED`. |
+| `/api/auth/verify` | `GET` | Verifies a user's account using a code sent via email. |
+| `/api/auth/login` | `POST` | Authenticates a user and returns secure session cookies. |
+| `/api/auth/refresh` | `POST` | Uses the refresh token cookie to issue a new access token. |
+| `/api/auth/logout` | `POST` | Invalidates the user's session and clears cookies. |
 
-**POST `/api/auth/signup`**
-```json
-{
-    "username": "johndoe",
-    "email": "john.doe@example.com",
-    "password": "a-very-secure-password"
-}
-```
+### 4.2. Password Management Endpoints
 
-**POST `/api/auth/login`**
-```json
-{
-    "usernameOrEmail": "johndoe",
-    "password": "a-very-secure-password"
-}
-```
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/auth/password/forgot` | `POST` | Triggers a 6-digit reset code to be sent to the user's email. |
+| `/api/auth/password/reset` | `POST` | Resets the password using the 6-digit code and a new password. |
+
+### 4.3. User Account Management Endpoints
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/users/me` | `GET` | **(Authenticated)** Retrieves the profile of the currently logged-in user. |
+| `/api/users/me` | `DELETE` | **(Authenticated)** Permanently deletes the currently logged-in user's account. |
+| `/api/users/me/password` | `POST` | **(Authenticated)** Allows a logged-in user to change their password. |
+| `/api/users/me/linked-accounts` | `GET` | **(Authenticated)** Retrieves a list of linked social accounts. |
+| `/api/users/me/link-oauth` | `POST` | **(Authenticated)** Links a new social account (Google/GitHub). |
+| `/api/users/me/unlink-oauth` | `POST` | **(Authenticated)** Unlinks a previously linked social account. |
+
+### 4.4. Admin Endpoints
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/api/admin/users` | `GET` | **(Admin Only)** Retrieves a list of all users. |
+| `/api/admin/users/{id}` | `GET` | **(Admin Only)** Retrieves the details of a specific user by their ID. |
+| `/api/admin/roles` | `GET` | **(Admin Only)** Retrieves a list of all available roles. |
+| `/api/admin/users/{id}/roles` | `PUT` | **(Admin Only)** Updates the roles for a specific user. |
+| `/api/admin/users/{id}/disable` | `POST` | **(Admin Only)** Disables a user's account by their ID. |
+| `/api/admin/users/{id}/enable` | `POST` | **(Admin Only)** Re-enables a disabled user's account by their ID. |
+| `/api/admin/users/{id}` | `DELETE` | **(Admin Only)** Permanently deletes a user's account by their ID. |
+
+### 4.5. Browser-Only Endpoints
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `/` | `GET` | Public health-check endpoint. |
+| `/oauth2/authorization/{provider}` | `GET` | Initiates the OAuth2 login flow for `google` or `github`. |
 
 ---
 
-## 5. OAuth2 Integration Flow
+## 5. User Flows
 
-The OAuth2 endpoints are not traditional REST endpoints and are designed for a browser-based redirect flow.
+### 5.1. Account Verification Flow
+1.  A user signs up via `POST /api/auth/signup`.
+2.  The service creates the user with `accountStatus = UNVERIFIED` and sends an email containing a verification link.
+3.  The user clicks the link, which directs them to `GET /api/auth/verify?code=...`.
+4.  The service validates the code, sets the user's `accountStatus` to `ACTIVE`, and the user can now log in.
 
-1.  **Initiation:** A frontend application directs the user's browser to `http://localhost:8080/oauth2/authorization/google` (or `github`).
-2.  **Provider Authentication:** The user is redirected to the provider's login page (e.g., Google's sign-in form).
-3.  **Callback:** After successful authentication, the provider redirects the user back to the service's callback URL (`/login/oauth2/code/{provider}`), which is handled automatically by Spring Security.
-4.  **Session Creation:** The Auth Service processes the callback, creates a local user account if one doesn't exist, issues JWTs, and sets them as secure cookies.
-5.  **Final Redirect:** The service redirects the user's browser to the success URL defined in `app.oauth2.success-redirect` in the configuration.
+### 5.2. Forgot Password Flow
+1.  A user submits their email to `POST /api/auth/password/forgot`.
+2.  The service sends an email containing a 6-digit reset code.
+3.  The user submits the code and their new password to `POST /api/auth/password/reset`.
+4.  The service validates the code and updates the user's password.
+
+### 5.3. Social Account Linking Flow
+1.  The user logs into the application with their local username and password.
+2.  The frontend application initiates an OAuth2 flow with the desired provider (e.g., Google) to obtain a one-time `authorization_code`.
+3.  The frontend makes a `POST` request to `/api/users/me/link-oauth`, sending the `provider` name and the `authorization_code`.
+4.  The backend service securely exchanges the code for an access token, fetches the user's profile from the provider, performs security checks, and creates the link in the database.
 
 ---
 
-## 6. Technical Stack
+## 6. Technical Stack & Project Structure
 
 *   **Framework:** Spring Boot 3.5.5
 *   **Language:** Java 21
@@ -110,7 +154,40 @@ The OAuth2 endpoints are not traditional REST endpoints and are designed for a b
 *   **Data Access:** Spring Data JPA / Hibernate
 *   **Database Migrations:** Flyway
 *   **Build Tool:** Apache Maven
+*   **Email Templating:** Thymeleaf
 *   **JWT Library:** `jjwt`
+
+```
+.
+├── .mvn/                           // Maven Wrapper configuration
+├── src/
+│   ├── main/
+│   │   ├── java/
+│   │   │   ├── com/febin/auth/
+│   │   │   │   ├── AuthApplication.java      // Main Spring Boot application class
+│   │   │   │   ├── config/                   // Spring Security configuration
+│   │   │   │   ├── controller/               // REST API controllers (Auth, User, Admin, Password)
+│   │   │   │   ├── dto/                      // Data Transfer Objects for API requests/responses
+│   │   │   │   ├── entity/                   // JPA entity classes (database models)
+│   │   │   │   ├── exception/                // Custom exception classes and global handler
+│   │   │   │   ├── oauth/                    // OAuth2 login success/failure handlers
+│   │   │   │   ├── ratelimit/                // Rate limiting filter implementation
+│   │   │   │   ├── repository/               // Spring Data JPA repositories
+│   │   │   │   ├── security/                 // Custom security components (e.g., JWT filter)
+│   │   │   │   ├── service/                  // Business logic and services
+│   │   │   │   └── util/                     // Utility classes (e.g., JWT, Cookies)
+│   │   │   └── db/migration/               // Flyway database migration scripts (Java-based)
+│   │   └── resources/
+│   │       ├── application.properties      // Main application configuration
+│   │       ├── static/
+│   │       └── templates/                  // HTML email templates (Thymeleaf)
+│   └── test/
+│       └── java/                         // Test source files
+├── .gitignore                        // Specifies intentionally untracked files to ignore
+├── Dockerfile                        // Instructions for building a Docker image
+├── mvnw & mvnw.cmd                   // Maven Wrapper scripts
+└── pom.xml                           // Project Object Model: defines dependencies and build config
+```
 
 ---
 
@@ -132,39 +209,3 @@ The primary configuration is managed in `src/main/resources/application.properti
 2.  Update the credentials in `application.properties`.
 3.  Run the application using the main class `com.febin.auth.AuthApplication` or via the Maven command: `mvn spring-boot:run`.
 
----
-
-## 8. Project Structure
-
-The project follows a standard Maven directory layout. Key files and directories are organized as follows:
-
-```
-.
-├── .mvn/                           // Maven Wrapper configuration
-├── src/
-│   ├── main/
-│   │   ├── java/
-│   │   │   ├── com/febin/auth/
-│   │   │   │   ├── AuthApplication.java      // Main Spring Boot application class
-│   │   │   │   ├── config/                   // Spring Security and other configurations
-│   │   │   │   ├── controller/               // REST API controllers
-│   │   │   │   ├── dto/                      // Data Transfer Objects (for API requests/responses)
-│   │   │   │   ├── entity/                   // JPA entity classes (database models)
-│   │   │   │   ├── oauth/                    // OAuth2 login success/failure handlers
-│   │   │   │   ├── ratelimit/                // Rate limiting filter implementation
-│   │   │   │   ├── repository/               // Spring Data JPA repositories
-│   │   │   │   ├── security/                 // Custom security components (e.g., JWT filter)
-│   │   │   │   ├── service/                  // Business logic and services
-│   │   │   │   └── util/                     // Utility classes (e.g., JWT, Cookies)
-│   │   │   └── db/migration/               // Flyway database migration scripts (Java-based)
-│   │   └── resources/
-│   │       ├── application.properties      // Main application configuration
-│   │       └── static/                     // Static assets (if any)
-│   └── test/
-│       └── java/                         // Test source files
-├── .gitignore                        // Specifies intentionally untracked files to ignore
-├── Dockerfile                        // Instructions for building a Docker image
-├── mvnw                              // Maven Wrapper script for Unix-like systems
-├── mvnw.cmd                          // Maven Wrapper script for Windows
-└── pom.xml                           // Project Object Model: defines dependencies and build config
-```

@@ -7,19 +7,31 @@ import com.febin.auth.repository.RoleRepository;
 import com.febin.auth.repository.UserProviderRepository;
 import com.febin.auth.repository.UserRepository;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.oauth2.client.registration.ClientRegistration;
+import org.springframework.security.oauth2.client.registration.ClientRegistrationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.LinkedMultiValueMap;
+import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.RestTemplate;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class UserService implements UserDetailsService {
@@ -28,17 +40,22 @@ public class UserService implements UserDetailsService {
     private final UserProviderRepository userProviderRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final ClientRegistrationRepository clientRegistrationRepository;
+    private final RestTemplate restTemplate;
 
     public UserService(UserRepository userRepository,
                        RoleRepository roleRepository,
                        UserProviderRepository userProviderRepository,
                        @Lazy PasswordEncoder passwordEncoder,
-                       EmailService emailService) {
+                       EmailService emailService,
+                       ClientRegistrationRepository clientRegistrationRepository) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.userProviderRepository = userProviderRepository;
         this.passwordEncoder = passwordEncoder;
         this.emailService = emailService;
+        this.clientRegistrationRepository = clientRegistrationRepository;
+        this.restTemplate = new RestTemplate();
     }
 
     @Override
@@ -120,6 +137,15 @@ public class UserService implements UserDetailsService {
         return userRepository.findAll();
     }
 
+    public User findUserById(Long id) {
+        return userRepository.findById(id)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + id));
+    }
+
+    public List<Role> findAllRoles() {
+        return roleRepository.findAll();
+    }
+
     @Transactional
     public void disableUserAccount(Long userIdToDisable, User adminUser) {
         if (userIdToDisable.equals(adminUser.getId())) {
@@ -132,6 +158,99 @@ public class UserService implements UserDetailsService {
         userRepository.save(userToDisable);
     }
 
+    @Transactional
+    public void enableUserAccount(Long userIdToEnable) {
+        User userToEnable = userRepository.findById(userIdToEnable)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + userIdToEnable));
+
+        userToEnable.setAccountStatus(AccountStatus.ACTIVE);
+        userRepository.save(userToEnable);
+    }
+
+    @Transactional
+    public void updateUserRoles(Long userIdToUpdate, Set<String> roleNames, User adminUser) {
+        if (userIdToUpdate.equals(adminUser.getId())) {
+            throw new IllegalArgumentException("Admin cannot change their own roles.");
+        }
+
+        User userToUpdate = userRepository.findById(userIdToUpdate)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + userIdToUpdate));
+
+        Set<Role> newRoles = roleRepository.findByNameIn(roleNames);
+        if (newRoles.size() != roleNames.size()) {
+            throw new IllegalArgumentException("One or more invalid role names provided.");
+        }
+
+        userToUpdate.setRoles(newRoles);
+        userRepository.save(userToUpdate);
+    }
+
+    @Transactional
+    public void deleteUserAccount(Long idToDelete, User requestingUser) {
+        // First, ensure the user to be deleted actually exists.
+        User userToDelete = userRepository.findById(idToDelete)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found with id: " + idToDelete));
+
+        boolean isAdmin = requestingUser.getRoles().stream().anyMatch(role -> role.getName().equals("ROLE_ADMIN"));
+
+        if (isAdmin) {
+            if (idToDelete.equals(requestingUser.getId())) {
+                throw new IllegalArgumentException("Admin cannot delete their own account.");
+            }
+            userRepository.delete(userToDelete);
+        } else {
+            if (!idToDelete.equals(requestingUser.getId())) {
+                throw new org.springframework.security.access.AccessDeniedException("User can only delete their own account.");
+            }
+            userRepository.delete(userToDelete);
+        }
+    }
+
+    @Transactional
+    public void linkOAuthAccount(User user, String provider, String code) {
+        ClientRegistration clientRegistration = clientRegistrationRepository.findByRegistrationId(provider.toLowerCase());
+        if (clientRegistration == null) {
+            throw new IllegalArgumentException("Unknown provider: " + provider);
+        }
+
+        // 1. Exchange authorization code for access token
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+        MultiValueMap<String, String> map = new LinkedMultiValueMap<>();
+        map.add("client_id", clientRegistration.getClientId());
+        map.add("client_secret", clientRegistration.getClientSecret());
+        map.add("code", code);
+        map.add("grant_type", "authorization_code");
+        map.add("redirect_uri", clientRegistration.getRedirectUri());
+
+        HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(map, headers);
+        Map<String, Object> tokenResponse = restTemplate.exchange(clientRegistration.getProviderDetails().getTokenUri(), HttpMethod.POST, request, new ParameterizedTypeReference<Map<String, Object>>() {}).getBody();
+        String accessToken = (String) tokenResponse.get("access_token");
+
+        // 2. Fetch user info from provider
+        HttpHeaders userInfoHeaders = new HttpHeaders();
+        userInfoHeaders.setBearerAuth(accessToken);
+        HttpEntity<Void> userInfoRequest = new HttpEntity<>(userInfoHeaders);
+        Map<String, Object> userInfo = restTemplate.exchange(clientRegistration.getProviderDetails().getUserInfoEndpoint().getUri(), HttpMethod.GET, userInfoRequest, new ParameterizedTypeReference<Map<String, Object>>() {}).getBody();
+
+        String providerId = userInfo.get(clientRegistration.getProviderDetails().getUserInfoEndpoint().getUserNameAttributeName()).toString();
+        String email = (String) userInfo.get("email");
+
+        // 3. Security Validations
+        if (!user.getEmail().equalsIgnoreCase(email)) {
+            throw new IllegalArgumentException("OAuth account email does not match your account email.");
+        }
+
+        OAuthProvider oAuthProvider = OAuthProvider.valueOf(provider.toUpperCase());
+        addProviderToUser(user, oAuthProvider, providerId);
+    }
+
+    @Transactional
+    public void unlinkOAuthAccount(User user, String provider) {
+        OAuthProvider oAuthProvider = OAuthProvider.valueOf(provider.toUpperCase());
+        removeProviderFromUser(user, oAuthProvider);
+    }
+
     public Optional<User> findByUsernameOrEmail(String usernameOrEmail) {
         Optional<User> byUsername = userRepository.findByUsername(usernameOrEmail);
         if (byUsername.isPresent()) return byUsername;
@@ -141,8 +260,12 @@ public class UserService implements UserDetailsService {
     public User addProviderToUser(User user, OAuthProvider provider, String providerId) {
         Optional<UserProvider> existing = userProviderRepository.findByProviderAndProviderId(provider, providerId);
         if (existing.isPresent() && !existing.get().getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("Provider already linked to another user");
+            throw new RuntimeException("This " + provider + " account is already linked to another user.");
         }
+        if (userProviderRepository.existsByUserAndProvider(user, provider)) {
+            throw new RuntimeException("You have already linked a " + provider + " account.");
+        }
+
         UserProvider up = new UserProvider(user, provider, providerId);
         userProviderRepository.save(up);
         return user;

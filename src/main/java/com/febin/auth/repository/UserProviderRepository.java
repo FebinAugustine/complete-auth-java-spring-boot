@@ -11,6 +11,7 @@ import java.util.Optional;
 public interface UserProviderRepository extends JpaRepository<UserProvider, Long> {
     Optional<UserProvider> findByProviderAndProviderId(OAuthProvider provider, String providerId);
     List<UserProvider> findByUser(User user);
+    boolean existsByUserAndProvider(User user, OAuthProvider provider);
     void deleteByUserAndProvider(User user, OAuthProvider provider);
     void deleteByUserAndProviderId(User user, String providerId);
 }
